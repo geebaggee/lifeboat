@@ -37,7 +37,7 @@ Set the endpoint to `https://<account-id>.r2.cloudflarestorage.com` and the regi
 
 ## Supabase database URL
 
-Use the **session pooler** or the **direct** connection string from Project Settings → Database. `pg_dump` does not work through the transaction pooler (port 6543). Store it as the Actions secret `DATABASE_URL`. LastGood never receives this URL.
+For Supabase, use the **Session pooler** connection string from Connect, on port 5432. The host looks like `aws-0-<region>.pooler.supabase.com`. Do not use the direct host `db.<project-ref>.supabase.co`. That host is IPv6-only, and GitHub-hosted runners fail with `Network is unreachable`. Do not use the transaction pooler on port 6543. Store the URL as the Actions secret `DATABASE_URL`. LastGood never receives this URL.
 
 ## Storage objects
 
@@ -86,7 +86,7 @@ GitHub secrets:
 
 | Name | Purpose |
 |---|---|
-| `DATABASE_URL` | Session or direct Postgres URL |
+| `DATABASE_URL` | Session pooler Postgres URL on port 5432. Not `db.*.supabase.co`. |
 | `LIFEBOAT_ACCESS_KEY_ID` | Destination access key |
 | `LIFEBOAT_SECRET_ACCESS_KEY` | Destination secret key |
 | `SUPABASE_STORAGE_S3_ACCESS_KEY_ID` | Optional source key |
@@ -101,8 +101,8 @@ If `pg_restore` fails because an extension is missing, change the throwaway imag
 
 1. Create an empty public repository, for example `geebaggee/lifeboat`.
 2. Copy this directory to the root of that repository, including `action.yml`.
-3. Tag `v1` and publish a release with that tag.
-4. In customer workflows, pin the full commit of that tag: `uses: geebaggee/lifeboat@<40-character sha> # v1`. Do not pin the movable tag.
+3. Publish a new release tag, such as `v1.0.1`. Do not move an existing tag.
+4. In customer workflows, pin the full commit of that tag: `uses: geebaggee/lifeboat@<40-character sha> # v1.0.1`. Do not pin the movable tag.
 
 ## Tests
 

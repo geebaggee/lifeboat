@@ -4,6 +4,12 @@
 name: Lifeboat
 
 on:
+  push:
+    # Merging a change to this file runs the backup. A successful backup on that push runs the restore test.
+    branches:
+      - "main"
+    paths:
+      - .github/workflows/lifeboat.yml
   schedule:
     # 16:17 UTC is 02:17 in Australian Eastern Standard Time, or 03:17 during daylight saving.
     - cron: "17 16 * * *"
@@ -25,7 +31,7 @@ permissions:
 
 jobs:
   backup:
-    if: github.event_name == 'schedule' && github.event.schedule == '17 16 * * *' || github.event.inputs.mode == 'backup'
+    if: github.event_name == 'push' || github.event_name == 'schedule' && github.event.schedule == '17 16 * * *' || github.event.inputs.mode == 'backup'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +56,8 @@ jobs:
           checkin-secret: ${{ secrets.LIFEBOAT_CHECKIN_SECRET }}
 
   restore-test:
-    if: github.event_name == 'schedule' && github.event.schedule == '17 17 1 * *' || github.event.inputs.mode == 'restore-test'
+    needs: backup
+    if: always() && (github.event_name == 'push' && needs.backup.result == 'success' || github.event_name == 'schedule' && github.event.schedule == '17 17 1 * *' || github.event.inputs.mode == 'restore-test')
     runs-on: ubuntu-latest
     services:
       postgres:
