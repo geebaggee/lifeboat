@@ -1,0 +1,84 @@
+# Copy this file to .github/workflows/lifeboat.yml in the app repository.
+# A published customer workflow pins geebaggee/lifeboat@<40-character commit> # v1.
+# This copy runs the action beside it, for a local check.
+name: Lifeboat
+
+on:
+  schedule:
+    # 16:17 UTC is 02:17 in Australian Eastern Standard Time, or 03:17 during daylight saving.
+    - cron: "17 16 * * *"
+    # First day of the month, an hour later, restores the newest dump.
+    - cron: "17 17 1 * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: backup or restore-test
+        required: true
+        default: backup
+        type: choice
+        options:
+          - backup
+          - restore-test
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    if: github.event_name == 'schedule' && github.event.schedule == '17 16 * * *' || github.event.inputs.mode == 'backup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./lifeboat
+        with:
+          mode: backup
+          postgres-major: "17"
+          project: ${{ vars.LIFEBOAT_PROJECT }}
+          database-url: ${{ secrets.DATABASE_URL }}
+          s3-bucket: ${{ vars.LIFEBOAT_BUCKET }}
+          s3-access-key-id: ${{ secrets.LIFEBOAT_ACCESS_KEY_ID }}
+          s3-secret-access-key: ${{ secrets.LIFEBOAT_SECRET_ACCESS_KEY }}
+          s3-endpoint: ${{ vars.LIFEBOAT_S3_ENDPOINT }}
+          s3-region: ${{ vars.LIFEBOAT_S3_REGION }}
+          s3-prefix: ${{ vars.LIFEBOAT_PREFIX }}
+          encryption-passphrase: ${{ secrets.LIFEBOAT_ENCRYPTION_PASSPHRASE }}
+          manage-retention: ${{ vars.LIFEBOAT_MANAGE_RETENTION }}
+          storage-s3-endpoint: ${{ vars.SUPABASE_STORAGE_S3_ENDPOINT }}
+          storage-s3-region: ${{ vars.SUPABASE_STORAGE_S3_REGION }}
+          storage-s3-access-key-id: ${{ secrets.SUPABASE_STORAGE_S3_ACCESS_KEY_ID }}
+          storage-s3-secret-access-key: ${{ secrets.SUPABASE_STORAGE_S3_SECRET_ACCESS_KEY }}
+          checkin-secret: ${{ secrets.LIFEBOAT_CHECKIN_SECRET }}
+
+  restore-test:
+    if: github.event_name == 'schedule' && github.event.schedule == '17 17 1 * *' || github.event.inputs.mode == 'restore-test'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: throwaway
+          POSTGRES_DB: restore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./lifeboat
+        with:
+          mode: restore-test
+          postgres-major: "17"
+          project: ${{ vars.LIFEBOAT_PROJECT }}
+          restore-database-url: postgresql://postgres:throwaway@localhost:5432/restore
+          s3-bucket: ${{ vars.LIFEBOAT_BUCKET }}
+          s3-access-key-id: ${{ secrets.LIFEBOAT_ACCESS_KEY_ID }}
+          s3-secret-access-key: ${{ secrets.LIFEBOAT_SECRET_ACCESS_KEY }}
+          s3-endpoint: ${{ vars.LIFEBOAT_S3_ENDPOINT }}
+          s3-region: ${{ vars.LIFEBOAT_S3_REGION }}
+          s3-prefix: ${{ vars.LIFEBOAT_PREFIX }}
+          encryption-passphrase: ${{ secrets.LIFEBOAT_ENCRYPTION_PASSPHRASE }}
+          manage-retention: ${{ vars.LIFEBOAT_MANAGE_RETENTION }}
+          checkin-secret: ${{ secrets.LIFEBOAT_CHECKIN_SECRET }}
