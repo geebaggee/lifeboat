@@ -98,6 +98,29 @@ function runBackup(extra) {
   return { result, log };
 }
 
+test("a direct Supabase host fails before pg_dump and does not print the URL", () => {
+  const password = "pooler-password-must-stay-hidden";
+  const ref = "abcdefghijklmnopqrst";
+  const { result, log } = runBackup({
+    LIFEBOAT_ENCRYPT: "false",
+    DATABASE_URL: `postgresql://lifeboat_reader:${password}@db.${ref}.supabase.co:5432/postgres`,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /IPv6-only/);
+  assert.match(result.stderr, /Session pooler/);
+  assert.match(result.stderr, /6543/);
+  assert.equal(log, "");
+  assert.doesNotMatch(result.stderr, new RegExp(password));
+  assert.doesNotMatch(result.stderr, new RegExp(ref));
+
+  const pooler = runBackup({
+    LIFEBOAT_ENCRYPT: "false",
+    DATABASE_URL: `postgresql://lifeboat_reader.${ref}:${password}@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres`,
+  });
+  assert.equal(pooler.result.status, 0, pooler.result.stderr);
+  assert.doesNotMatch(pooler.result.stderr, new RegExp(password));
+});
+
 test("an empty passphrase fails before upload", () => {
   const { result, log } = runBackup({ LIFEBOAT_ENCRYPT: "true", LIFEBOAT_ENCRYPTION_PASSPHRASE: "" });
   assert.notEqual(result.status, 0);

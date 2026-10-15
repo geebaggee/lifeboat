@@ -10,7 +10,7 @@ inputs:
     required: false
     default: backup
   database-url:
-    description: Session-mode or direct Postgres URL. Not the transaction pooler.
+    description: Session pooler Postgres URL on port 5432. Not the direct db.*.supabase.co host, and not the transaction pooler.
     required: false
     default: ""
   restore-database-url:
