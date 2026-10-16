@@ -17,7 +17,7 @@ This folder is the action. It does not import the LastGood website. It can be mo
 `restore-test`:
 
 1. Downloads the newest `.backup` under the prefix, decrypts it when it is encrypted, and deletes the encrypted download before restore.
-2. Drops schemas the dump will recreate when the throwaway database already has them, including `auth` and `storage`. That database is disposable. `public` stays. `pg_restore -L` then skips extensions the target does not offer, including `pg_cron`, `pg_net`, `pgsodium` and `supabase_vault`, and objects in those extension schemas. An extension that is already installed is left in place.
+2. On the throwaway database, creates `anon`, `authenticated`, `service_role`, `supabase_admin` and `authenticator` when they are missing. Then drops every event trigger, every publication, objects already in `public`, and every other non-system schema except schemas an extension owns (`extensions`, `graphql`, `vault`, `cron` and the rest). That database is disposable. `public` stays. `pg_restore -L` then skips extensions the target does not offer, including `pg_cron`, `pg_net`, `pgsodium` and `supabase_vault`, and objects in those extension schemas. An extension, publication, or event trigger that is still there is left in place. An `already exists` error is a warning. A data error, or a row count that does not match, fails the job.
 3. Restores with `--no-owner` and `--no-acl`. A missing extension is a warning. A data error fails the job.
 4. Compares `count(*)` on up to three small user tables with the `COPY` rows in the dump.
 5. Posts a check-in with `kind` `restore-test`.
