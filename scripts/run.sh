@@ -30,6 +30,13 @@ mask "${STORAGE_S3_SECRET_ACCESS_KEY:-}"
 mask "${LIFEBOAT_ENCRYPTION_PASSPHRASE:-}"
 mask "${CHECKIN_SECRET:-}"
 
+# The workflow records the database it actually started. The action input is only the fallback.
+if [[ -n "${RUNNER_TEMP:-}" && -f "${RUNNER_TEMP}/lifeboat-restore-url" ]]; then
+  RESTORE_DATABASE_URL="$(tr -d '\r\n' < "${RUNNER_TEMP}/lifeboat-restore-url")"
+  mask "${RESTORE_DATABASE_URL}"
+  mask_url_secret "${RESTORE_DATABASE_URL}"
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODE="${LIFEBOAT_MODE:-backup}"
 
@@ -303,12 +310,28 @@ elif [[ "$MODE" == "restore-test" ]]; then
   aws_s3 s3 cp "s3://${BUCKET}/${key}" "$WORKDIR/restore.download"
   if [[ "$key" == *.enc ]]; then
     decrypt_file "$WORKDIR/restore.download" "$WORKDIR/restore.backup"
+    rm -f "$WORKDIR/restore.download"
   else
-    cp "$WORKDIR/restore.download" "$WORKDIR/restore.backup"
+    mv "$WORKDIR/restore.download" "$WORKDIR/restore.backup"
   fi
   DUMP_BYTES="$(wc -c <"$WORKDIR/restore.backup" | tr -d ' ')"
+  avail_kb="$(df -Pk "$WORKDIR" | awk 'NR==2 {print $4}')"
+  echo "Restore disk free: ${avail_kb} KiB. Dump bytes: ${DUMP_BYTES}."
+  if [[ "$avail_kb" =~ ^[0-9]+$ ]] && (( avail_kb * 1024 < DUMP_BYTES )); then
+    fail "Not enough free disk to restore this dump."
+  fi
   assert_client_can_read "$RESTORE_DATABASE_URL"
-  "$PG_RESTORE" --dbname "$RESTORE_DATABASE_URL" --no-owner --no-acl --exit-on-error "$WORKDIR/restore.backup"
+  "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT name FROM pg_available_extensions" >"$WORKDIR/extensions.txt"
+  "$PG_RESTORE" --list "$WORKDIR/restore.backup" >"$WORKDIR/restore.toc"
+  node "$ROOT/scripts/restore-list.mjs" filter "$WORKDIR/restore.toc" "$WORKDIR/extensions.txt" "$WORKDIR/restore.list" "$WORKDIR/restore.skip.json"
+  set +e
+  "$PG_RESTORE" --dbname "$RESTORE_DATABASE_URL" --no-owner --no-acl -L "$WORKDIR/restore.list" "$WORKDIR/restore.backup" >"$WORKDIR/restore.out" 2>"$WORKDIR/restore.err"
+  restore_status=$?
+  set -e
+  node "$ROOT/scripts/restore-list.mjs" classify "$WORKDIR/restore.err" "$WORKDIR/restore.skip.json" "$restore_status"
+  LIFEBOAT_PSQL="$PSQL" LIFEBOAT_PG_RESTORE="$PG_RESTORE" \
+    node "$ROOT/scripts/restore-list.mjs" sample "$WORKDIR/restore.toc" "$WORKDIR/restore.skip.json" "$WORKDIR/restore.backup"
+  rm -f "$WORKDIR/restore.backup"
   "$PSQL" "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --command "SELECT current_database();"
 else
   fail "LIFEBOAT_MODE must be backup or restore-test."
