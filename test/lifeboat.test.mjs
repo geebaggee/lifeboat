@@ -6,6 +6,7 @@ import {
   countCopyRows,
   dropSchemaSql,
   filterRestoreList,
+  throwawayDropSql,
   sanitiseRestoreLine,
   schemasToDrop,
   selectSampleTables,
@@ -82,23 +83,54 @@ const SUPABASE_TOC = `${TOC}
 13; 2615 2203 SCHEMA - auth postgres
 14; 2615 2204 SCHEMA - storage postgres
 15; 2615 2205 SCHEMA - realtime postgres
+16; 6104 2206 PUBLICATION - supabase_realtime postgres
+17; 3466 2207 EVENT TRIGGER - pgrst_ddl_watch postgres
+18; 6106 2208 PUBLICATION TABLE supabase_realtime widgets postgres
+19; 1255 2209 FUNCTION public noop_ddl() postgres
 26; 1259 3007 TABLE auth users postgres
 27; 1259 3008 TABLE DATA auth users postgres
 28; 0 0 COMMENT - SCHEMA public postgres
+29; 0 0 COMMENT - PUBLICATION supabase_realtime postgres
 `;
 
 test("a Supabase image keeps public and drops schemas the dump will recreate", () => {
-  const existing = ["public", "auth", "storage", "realtime", "extensions", "pg_catalog", "pg_toast"];
-  assert.deepEqual(schemasToDrop(SUPABASE_TOC, existing), ["auth", "realtime", "storage"]);
-  assert.equal(dropSchemaSql(["auth", "storage", "public", "pg_catalog"]), "DROP SCHEMA IF EXISTS auth CASCADE;\nDROP SCHEMA IF EXISTS storage CASCADE;");
+  const existing = ["public", "auth", "storage", "realtime", "extensions", "graphql", "vault", "cron", "supabase_migrations", "pg_catalog", "pg_toast"];
+  assert.deepEqual(schemasToDrop(SUPABASE_TOC, existing), ["auth", "realtime", "storage", "supabase_migrations"]);
+  assert.equal(dropSchemaSql(["auth", "storage", "public", "pg_catalog", "graphql", "extensions"]), "DROP SCHEMA IF EXISTS auth CASCADE;\nDROP SCHEMA IF EXISTS storage CASCADE;");
+  const drop = throwawayDropSql(SUPABASE_TOC, {
+    schemas: existing,
+    publications: ["supabase_realtime"],
+    eventTriggers: ["pgrst_ddl_watch"],
+  });
+  assert.deepEqual(drop.eventTriggers, ["pgrst_ddl_watch"]);
+  assert.deepEqual(drop.publications, ["supabase_realtime"]);
+  assert.deepEqual(drop.schemas, ["auth", "realtime", "storage", "supabase_migrations"]);
+  assert.match(drop.sql, /CREATE ROLE %I NOLOGIN NOINHERIT/);
+  assert.match(drop.sql, /DROP PUBLICATION IF EXISTS supabase_realtime;\nDROP TABLE IF EXISTS public\.widgets CASCADE;\nDROP FUNCTION IF EXISTS public\.noop_ddl\(\) CASCADE;\nDROP SCHEMA IF EXISTS auth CASCADE;/);
+  assert.match(drop.sql, /DROP SCHEMA IF EXISTS supabase_migrations CASCADE/);
+  assert.match(drop.sql, /nspname = 'public'/);
+  assert.equal(drop.sql.includes("DROP TABLE IF EXISTS auth.users"), false);
+  assert.equal(drop.sql.includes("DROP SCHEMA IF EXISTS public"), false);
+  assert.equal(drop.sql.includes("DROP SCHEMA IF EXISTS extensions"), false);
+  assert.equal(drop.sql.includes("DROP SCHEMA IF EXISTS graphql"), false);
+  assert.equal(drop.sql.includes("DROP SCHEMA IF EXISTS vault"), false);
+  assert.equal(drop.sql.includes("DROP SCHEMA IF EXISTS cron"), false);
   const result = filterRestoreList(SUPABASE_TOC, ["plpgsql", "vector", "pg_cron"], {
     existingSchemas: ["public", "pg_catalog", "pg_toast"],
     installedExtensions: ["plpgsql"],
+    existingPublications: ["supabase_realtime"],
+    existingEventTriggers: ["pgrst_ddl_watch"],
   });
   assert.deepEqual(result.preexistingSchemas, ["public"]);
+  assert.deepEqual(result.preexistingPublications, ["supabase_realtime"]);
+  assert.deepEqual(result.preexistingEventTriggers, ["pgrst_ddl_watch"]);
   assert.deepEqual(result.installedExtensions, ["plpgsql"]);
   assert.match(result.text, /^;2; 3079 16384 EXTENSION - plpgsql postgres$/m);
   assert.match(result.text, /^;10; 2615 2200 SCHEMA - public postgres$/m);
+  assert.match(result.text, /^;16; 6104 2206 PUBLICATION - supabase_realtime postgres$/m);
+  assert.match(result.text, /^;17; 3466 2207 EVENT TRIGGER - pgrst_ddl_watch postgres$/m);
+  assert.match(result.text, /^;29; 0 0 COMMENT - PUBLICATION supabase_realtime postgres$/m);
+  assert.match(result.text, /^18; 6106 2208 PUBLICATION TABLE supabase_realtime widgets postgres$/m);
   assert.match(result.text, /^20; 1259 3000 TABLE public widgets postgres$/m);
   assert.match(result.text, /^13; 2615 2203 SCHEMA - auth postgres$/m);
   assert.match(result.text, /^26; 1259 3007 TABLE auth users postgres$/m);
@@ -111,9 +143,35 @@ test("a Supabase image keeps public and drops schemas the dump will recreate", (
   assert.equal(kept.warnings.length, 1);
   const auth = classifyRestoreErrors(
     'pg_restore: error: could not execute query: ERROR: schema "auth" already exists\n',
-    { preexisting: ["public"], installed: ["plpgsql"] },
+    {},
   );
-  assert.equal(auth.fatal.length, 1);
+  assert.deepEqual(auth.fatal, []);
+  assert.equal(auth.warnings.length, 1);
+  const publication = classifyRestoreErrors(
+    'pg_restore: error: could not execute query: ERROR: publication "supabase_realtime" already exists\n',
+    {},
+  );
+  assert.deepEqual(publication.fatal, []);
+  const member = classifyRestoreErrors(
+    'pg_restore: error: could not execute query: ERROR: relation "widgets" is already member of publication "supabase_realtime"\n',
+    {},
+  );
+  assert.deepEqual(member.fatal, []);
+  const owned = classifyRestoreErrors(
+    'pg_restore: error: could not execute query: ERROR: must be owner of publication supabase_realtime\n',
+    {},
+  );
+  assert.equal(owned.fatal.length, 1);
+  const keys = classifyRestoreErrors(
+    'pg_restore: error: could not execute query: ERROR: multiple primary keys for table "widgets" are not allowed\n',
+    {},
+  );
+  assert.equal(keys.fatal.length, 1);
+  const role = classifyRestoreErrors(
+    'pg_restore: error: could not execute query: ERROR: role "anon" already exists\n',
+    {},
+  );
+  assert.deepEqual(role.fatal, []);
   const extension = classifyRestoreErrors(
     'pg_restore: error: could not execute query: ERROR: extension "plpgsql" already exists\n',
     { preexisting: ["public"], installed: ["plpgsql"] },
