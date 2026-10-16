@@ -10,7 +10,7 @@ inputs:
     required: false
     default: backup
   database-url:
-    description: Session pooler Postgres URL on port 5432. Not the direct db.*.supabase.co host, and not the transaction pooler.
+    description: Session pooler Postgres URL on port 5432. The username must be role.project-ref, for example lastgood_backup.<project-ref>. Not the direct db.*.supabase.co host, and not the transaction pooler. LastGood can write this secret. A manual URL is the fallback.
     required: false
     default: ""
   restore-database-url:
@@ -43,7 +43,7 @@ inputs:
     required: false
     default: "true"
   encryption-passphrase:
-    description: Passphrase for client-side encryption. The customer generates it and keeps it. LastGood never sees it.
+    description: Passphrase the customer types and keeps. LastGood writes it once and does not keep a copy.
     required: false
     default: ""
   manage-retention:
