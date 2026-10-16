@@ -186,7 +186,7 @@ exit 1
   assert.equal(existsSync(marker), false);
 
   const action = readFileSync(path.join(ROOT, "action.yml"), "utf8");
-  assert.match(action, /\/usr\/lib\/postgresql\/\$\{\{major\}\}\/bin/);
+  assert.match(action, /\/usr\/lib\/postgresql\/\$\{major\}\/bin/);
   assert.match(action, /GITHUB_PATH/);
   assert.match(action, /POSTGRES_MAJOR: \$\{\{ inputs\.postgres-major \}\}/);
 });
