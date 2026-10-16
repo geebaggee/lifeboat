@@ -43,28 +43,11 @@ function fakes(dir) {
   const aws = path.join(dir, "aws");
   writeFileSync(
     pg,
-    `#!/bin/sh
-while [ $# -gt 0 ]; do
-  if [ "$1" = "--file" ]; then
-    printf 'dump' > "$2"
-    exit 0
-  fi
-  shift
-done
-exit 1
-`,
+    `#!/bin/sh\nwhile [ $# -gt 0 ]; do\n  if [ "$1" = "--file" ]; then\n    printf 'dump' > "$2"\n    exit 0\n  fi\n  shift\ndone\nexit 1\n`,
   );
   writeFileSync(
     aws,
-    `#!/bin/sh
-printf '%s\\n' "$*" >> "${awsLog}"
-case " $* " in
-  *" s3api "*)
-    printf '%s\\n' '{"Contents":[{"Key":"lifeboat/db/old.backup","LastModified":"2020-01-01T00:00:00.000Z"}]}'
-    ;;
-esac
-exit 0
-`,
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> "${awsLog}"\ncase " $* " in\n  *" s3api "*)\n    printf '%s\\n' '{"Contents":[{"Key":"lifeboat/db/old.backup","LastModified":"2020-01-01T00:00:00.000Z"}]}'\n    ;;\nesac\nexit 0\n`,
   );
   chmodSync(pg, 0o755);
   chmodSync(aws, 0o755);
@@ -119,6 +102,24 @@ test("a direct Supabase host fails before pg_dump and does not print the URL", (
   });
   assert.equal(pooler.result.status, 0, pooler.result.stderr);
   assert.doesNotMatch(pooler.result.stderr, new RegExp(password));
+
+  const missingRef = runBackup({
+    LIFEBOAT_ENCRYPT: "false",
+    DATABASE_URL: `postgresql://lastgood_backup:${password}@aws-0-ap-southeast-2.pooler.supabase.com:5432/postgres`,
+  });
+  assert.notEqual(missingRef.result.status, 0);
+  assert.match(missingRef.result.stderr, /project ref/);
+  assert.match(missingRef.result.stderr, /lastgood_backup\\.<project-ref>/);
+  assert.equal(missingRef.log, "");
+  assert.doesNotMatch(missingRef.result.stderr, new RegExp(password));
+  assert.doesNotMatch(missingRef.result.stderr, /aws-0-ap-southeast-2/);
+
+  const encoded = runBackup({
+    LIFEBOAT_ENCRYPT: "false",
+    DATABASE_URL: `postgresql://lastgood_backup%2E${ref}:${password}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres`,
+  });
+  assert.equal(encoded.result.status, 0, encoded.result.stderr);
+  assert.doesNotMatch(encoded.result.stderr, new RegExp(password));
 });
 
 test("an empty passphrase fails before upload", () => {
@@ -135,8 +136,8 @@ test("empty destination vars use Sydney and hosted mode does not delete", () => 
     LIFEBOAT_MANAGE_RETENTION: "",
   });
   assert.equal(byo.result.status, 0, byo.result.stderr);
-  assert.match(byo.log, /--endpoint-url https:\/\/s3\.ap-southeast-2\.wasabisys\.com/);
-  assert.match(byo.log, /\/lifeboat\/db\/.*\.backup$/m);
+  assert.match(byo.log, /--endpoint-url https:\\/\\/s3\\.ap-southeast-2\\.wasabisys\\.com/);
+  assert.match(byo.log, /\\/lifeboat\\/db\\/.*\\.backup$/m);
   assert.match(byo.log, /s3 rm/);
 
   const hosted = runBackup({
@@ -148,9 +149,9 @@ test("empty destination vars use Sydney and hosted mode does not delete", () => 
     S3_PREFIX: "cus_abc/app",
   });
   assert.equal(hosted.result.status, 0, hosted.result.stderr);
-  assert.match(hosted.log, /--endpoint-url https:\/\/s3\.eu-central-2\.wasabisys\.com/);
-  assert.match(hosted.log, /\.backup\.enc/);
-  assert.doesNotMatch(hosted.log, /dump\.backup"/);
+  assert.match(hosted.log, /--endpoint-url https:\\/\\/s3\\.eu-central-2\\.wasabisys\\.com/);
+  assert.match(hosted.log, /\\.backup\\.enc/);
+  assert.doesNotMatch(hosted.log, /dump\\.backup"/);
   assert.doesNotMatch(hosted.log, /s3 rm/);
   assert.doesNotMatch(hosted.log, /keep-this-local/);
   assert.match(hosted.result.stdout, /::add-mask::/);
