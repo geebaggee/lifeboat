@@ -37,7 +37,7 @@ Set the endpoint to `https://<account-id>.r2.cloudflarestorage.com` and the regi
 
 ## Supabase database URL
 
-For Supabase, use the **Session pooler** connection string from Connect, on port 5432. The host looks like `aws-0-<region>.pooler.supabase.com`. Do not use the direct host `db.<project-ref>.supabase.co`. That host is IPv6-only, and GitHub-hosted runners fail with `Network is unreachable`. Do not use the transaction pooler on port 6543. Store the URL as the Actions secret `DATABASE_URL`. LastGood never receives this URL.
+For Supabase, LastGood can write `DATABASE_URL` after you connect the project. The URL is the Session pooler on port 5432. The username must include the project ref, like `lastgood_backup.<project-ref>`. The host looks like `aws-0-<region>.pooler.supabase.com`. Do not use the direct host `db.<project-ref>.supabase.co`. That host is IPv6-only, and GitHub-hosted runners fail with `Network is unreachable`. Do not use the transaction pooler on port 6543. A manual URL is the fallback. LastGood writes the secret and does not keep a copy.
 
 ## Storage objects
 
@@ -86,7 +86,7 @@ GitHub secrets:
 
 | Name | Purpose |
 |---|---|
-| `DATABASE_URL` | Session pooler Postgres URL on port 5432. Not `db.*.supabase.co`. |
+| `DATABASE_URL` | Session pooler Postgres URL on port 5432. Username is `role.project-ref`. Not `db.*.supabase.co`. |
 | `LIFEBOAT_ACCESS_KEY_ID` | Destination access key |
 | `LIFEBOAT_SECRET_ACCESS_KEY` | Destination secret key |
 | `SUPABASE_STORAGE_S3_ACCESS_KEY_ID` | Optional source key |
