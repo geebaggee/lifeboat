@@ -22,6 +22,9 @@ test("the runner encrypts with openssl and does not delete when retention is off
   assert.match(source, /cannot read Postgres/);
   assert.doesNotMatch(source, /psql "\$DATABASE_URL"/);
   assert.match(source, /"\$PG_RESTORE" --dbname "\$RESTORE_DATABASE_URL"/);
+  assert.match(source, /-L "\$WORKDIR\/restore\.list"/);
+  assert.match(source, /rm -f "\$WORKDIR\/restore\.download"/);
+  assert.match(source, /restore-list\.mjs/);
   assert.match(source, /Refusing to restore into DATABASE_URL/);
   assert.match(source, /value_or "\$\{S3_ENDPOINT:-}" "https:\/\/s3\.ap-southeast-2\.wasabisys\.com"/);
 });
@@ -183,7 +186,7 @@ exit 1
   assert.equal(existsSync(marker), false);
 
   const action = readFileSync(path.join(ROOT, "action.yml"), "utf8");
-  assert.match(action, /\/usr\/lib\/postgresql\/\$\{major\}\/bin/);
+  assert.match(action, /\/usr\/lib\/postgresql\/\$\{\{major\}\}\/bin/);
   assert.match(action, /GITHUB_PATH/);
   assert.match(action, /POSTGRES_MAJOR: \$\{\{ inputs\.postgres-major \}\}/);
 });

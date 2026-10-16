@@ -16,10 +16,11 @@ This folder is the action. It does not import the LastGood website. It can be mo
 
 `restore-test`:
 
-1. Downloads the newest `.backup` under the prefix.
-2. `pg_restore` into `RESTORE_DATABASE_URL` with `--exit-on-error`.
-3. Runs `SELECT current_database()` against that database.
-4. Posts a check-in with `kind` `restore-test`.
+1. Downloads the newest `.backup` under the prefix, decrypts it when it is encrypted, and deletes the encrypted download before restore.
+2. Asks the target which extensions it offers. `pg_restore -L` skips extensions that are missing, including `pg_cron`, `pg_net`, `pgsodium` and `supabase_vault`, and objects in those extension schemas.
+3. Restores with `--no-owner` and `--no-acl`. A missing extension is a warning. A data error fails the job.
+4. Compares `count(*)` on up to three small user tables with the `COPY` rows in the dump.
+5. Posts a check-in with `kind` `restore-test`.
 
 The throwaway database is thrown away with the runner. It is not a second backup.
 
@@ -95,7 +96,7 @@ GitHub secrets:
 
 Scheduled workflows stop after 60 days without a repository commit. That is GitHub's rule. The check-in is how LastGood notices the silence; the receiver is a separate change.
 
-If `pg_restore` fails because an extension is missing, change the throwaway image in the workflow. `postgres:17` is the default. It does not include every Supabase extension. The dump uses `pg_dump` against `DATABASE_URL` and does not write to that database. Restore writes only to `RESTORE_DATABASE_URL`. The dump is encrypted on the runner before upload. Secret values are masked and are not printed.
+The customer workflow starts `public.ecr.aws/supabase/postgres` for Postgres 15 and 17, and `postgres:<major>` otherwise. If the Supabase image does not become ready, or the runner has less than 10 GiB free, the job uses the stock image. The list filter still skips extensions that image does not offer. The dump uses `pg_dump` against `DATABASE_URL` and does not write to that database. Restore writes only to `RESTORE_DATABASE_URL`. The dump is encrypted on the runner before upload. Secret values are masked and are not printed.
 
 ## Publish this folder on its own
 
