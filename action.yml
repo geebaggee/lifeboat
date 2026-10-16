@@ -100,21 +100,32 @@ runs:
           12|13|14|15|16|17) ;;
           *) echo "Postgres major must be 12, 13, 14, 15, 16 or 17." >&2; exit 1 ;;
         esac
-        if command -v pg_dump >/dev/null && command -v pg_restore >/dev/null && command -v psql >/dev/null && pg_dump --version | grep -Eq " ${major}\.[0-9]"; then
-          exit 0
+        # The runner image already has an older pg_dump on PATH. The matching client lives here.
+        bin="/usr/lib/postgresql/${major}/bin"
+        ready() {
+          [[ -x "${bin}/pg_dump" && -x "${bin}/pg_restore" && -x "${bin}/psql" ]] || return 1
+          "${bin}/pg_dump" --version | grep -Eq " ${major}\.[0-9]"
+        }
+        if ! ready; then
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          # shellcheck disable=SC1091
+          . /etc/os-release
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update
+          sudo apt-get install -y "postgresql-client-${major}"
         fi
-        sudo apt-get update
-        sudo apt-get install -y curl ca-certificates
-        sudo install -d /usr/share/postgresql-common/pgdg
-        sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
-        sudo apt-get update
-        sudo apt-get install -y "postgresql-client-${major}"
+        if ! ready; then
+          echo "postgresql-client-${major} is not available at ${bin}. The runner's default pg_dump is a different major and cannot dump a newer server." >&2
+          exit 1
+        fi
+        echo "$bin" >> "$GITHUB_PATH"
     - name: Run Lifeboat
       shell: bash
       env:
+        POSTGRES_MAJOR: ${{ inputs.postgres-major }}
         LIFEBOAT_MODE: ${{ inputs.mode }}
         DATABASE_URL: ${{ inputs.database-url }}
         RESTORE_DATABASE_URL: ${{ inputs.restore-database-url }}
