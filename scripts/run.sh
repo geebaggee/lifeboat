@@ -323,14 +323,19 @@ elif [[ "$MODE" == "restore-test" ]]; then
   assert_client_can_read "$RESTORE_DATABASE_URL"
   "$PG_RESTORE" --list "$WORKDIR/restore.backup" >"$WORKDIR/restore.toc"
   "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT nspname FROM pg_namespace" >"$WORKDIR/schemas.txt"
-  node "$ROOT/scripts/restore-list.mjs" drop-sql "$WORKDIR/restore.toc" "$WORKDIR/schemas.txt" "$WORKDIR/drop.sql"
+  "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT pubname FROM pg_publication" >"$WORKDIR/publications.txt"
+  "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT evtname FROM pg_event_trigger" >"$WORKDIR/event_triggers.txt"
+  node "$ROOT/scripts/restore-list.mjs" drop-sql "$WORKDIR/restore.toc" "$WORKDIR/schemas.txt" "$WORKDIR/drop.sql" "$WORKDIR/publications.txt" "$WORKDIR/event_triggers.txt"
   if [[ -s "$WORKDIR/drop.sql" ]]; then
-    "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --set ON_ERROR_STOP=1 --file "$WORKDIR/drop.sql"
+    # One object that will not drop must not hide the rest. Leftovers are warnings.
+    "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --set ON_ERROR_STOP=0 --file "$WORKDIR/drop.sql"
   fi
   "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT name FROM pg_available_extensions" >"$WORKDIR/extensions.txt"
   "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT nspname FROM pg_namespace" >"$WORKDIR/schemas.txt"
   "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT extname FROM pg_extension" >"$WORKDIR/installed.txt"
-  node "$ROOT/scripts/restore-list.mjs" filter "$WORKDIR/restore.toc" "$WORKDIR/extensions.txt" "$WORKDIR/restore.list" "$WORKDIR/restore.skip.json" "$WORKDIR/schemas.txt" "$WORKDIR/installed.txt"
+  "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT pubname FROM pg_publication" >"$WORKDIR/publications.txt"
+  "$PSQL" "$RESTORE_DATABASE_URL" --no-psqlrc --tuples-only --no-align --command "SELECT evtname FROM pg_event_trigger" >"$WORKDIR/event_triggers.txt"
+  node "$ROOT/scripts/restore-list.mjs" filter "$WORKDIR/restore.toc" "$WORKDIR/extensions.txt" "$WORKDIR/restore.list" "$WORKDIR/restore.skip.json" "$WORKDIR/schemas.txt" "$WORKDIR/installed.txt" "$WORKDIR/publications.txt" "$WORKDIR/event_triggers.txt"
   set +e
   "$PG_RESTORE" --dbname "$RESTORE_DATABASE_URL" --no-owner --no-acl -L "$WORKDIR/restore.list" "$WORKDIR/restore.backup" >"$WORKDIR/restore.out" 2>"$WORKDIR/restore.err"
   restore_status=$?
