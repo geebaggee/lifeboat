@@ -155,6 +155,45 @@ fi
 command -v aws >/dev/null || fail "The AWS CLI is not installed on this runner."
 command -v node >/dev/null || fail "Node.js is not installed on this runner."
 
+# GitHub-hosted runners ship an older pg_dump on PATH. Use the client installed for this major.
+PG_DIR="${LIFEBOAT_PG_BIN:-/usr/lib/postgresql/${POSTGRES_MAJOR:-17}/bin}"
+if [[ -x "${PG_DIR}/pg_dump" && -x "${PG_DIR}/pg_restore" && -x "${PG_DIR}/psql" ]]; then
+  PG_DUMP="${PG_DIR}/pg_dump"
+  PG_RESTORE="${PG_DIR}/pg_restore"
+  PSQL="${PG_DIR}/psql"
+else
+  PG_DUMP="pg_dump"
+  PG_RESTORE="pg_restore"
+  PSQL="psql"
+fi
+
+client_major() {
+  local version major
+  version="$("$1" --version 2>/dev/null || true)"
+  if [[ "$version" =~ ([0-9]+)\.[0-9]+ ]]; then
+    major="${BASH_REMATCH[1]}"
+    printf '%s' "$major"
+  fi
+}
+
+# pg_dump refuses a newer server. Say so before it aborts, and do not print the URL.
+assert_client_can_read() {
+  local url="$1"
+  local client server_num server_major
+  client="$(client_major "$PG_DUMP")"
+  [[ -n "$client" ]] || return 0
+  if [[ ! -x "$PSQL" ]] && ! command -v "$PSQL" >/dev/null 2>&1; then
+    return 0
+  fi
+  server_num="$("$PSQL" "$url" --no-psqlrc --tuples-only --no-align --command "SHOW server_version_num" 2>/dev/null || true)"
+  server_num="${server_num//[^0-9]/}"
+  [[ "$server_num" =~ ^[0-9]{5,6}$ ]] || return 0
+  server_major=$((server_num / 10000))
+  if [[ "$server_major" -gt "$client" ]]; then
+    fail "pg_dump ${client} cannot read Postgres ${server_major}. The database is newer than the client on this runner. Install postgresql-client-${server_major} and use /usr/lib/postgresql/${server_major}/bin/pg_dump. The runner's default pg_dump is older and is the wrong binary."
+  fi
+}
+
 encrypt_file() {
   local source="$1"
   local dest="$2"
@@ -243,9 +282,10 @@ copy_storage() {
 
 if [[ "$MODE" == "backup" ]]; then
   [[ -n "${DATABASE_URL:-}" ]] || fail "Set DATABASE_URL. Use the Supabase Session pooler on port 5432 (aws-*.pooler.supabase.com), not the direct db.*.supabase.co host and not the transaction pooler on port 6543."
-  command -v pg_dump >/dev/null || fail "pg_dump is not installed. The workflow should install postgresql-client."
+  [[ -x "$PG_DUMP" ]] || command -v "$PG_DUMP" >/dev/null || fail "pg_dump is not installed. The workflow should install postgresql-client."
+  assert_client_can_read "$DATABASE_URL"
   # Read-only. pg_dump does not write to the source database.
-  pg_dump "$DATABASE_URL" --format=custom --no-owner --no-acl --file "$WORKDIR/dump.backup"
+  "$PG_DUMP" "$DATABASE_URL" --format=custom --no-owner --no-acl --file "$WORKDIR/dump.backup"
   DUMP_BYTES="$(wc -c <"$WORKDIR/dump.backup" | tr -d ' ')"
   if [[ "$ENCRYPT" == "true" ]]; then
     encrypt_file "$WORKDIR/dump.backup" "$WORKDIR/dump.backup.enc"
@@ -257,8 +297,8 @@ if [[ "$MODE" == "backup" ]]; then
   apply_retention
 elif [[ "$MODE" == "restore-test" ]]; then
   [[ -n "${RESTORE_DATABASE_URL:-}" ]] || fail "Set RESTORE_DATABASE_URL to the throwaway Postgres in this runner."
-  command -v pg_restore >/dev/null || fail "pg_restore is not installed."
-  command -v psql >/dev/null || fail "psql is not installed."
+  [[ -x "$PG_RESTORE" ]] || command -v "$PG_RESTORE" >/dev/null || fail "pg_restore is not installed."
+  [[ -x "$PSQL" ]] || command -v "$PSQL" >/dev/null || fail "psql is not installed."
   key="$(latest_dump_key)" || fail "No .backup object was found under ${PREFIX}/db/."
   aws_s3 s3 cp "s3://${BUCKET}/${key}" "$WORKDIR/restore.download"
   if [[ "$key" == *.enc ]]; then
@@ -267,8 +307,9 @@ elif [[ "$MODE" == "restore-test" ]]; then
     cp "$WORKDIR/restore.download" "$WORKDIR/restore.backup"
   fi
   DUMP_BYTES="$(wc -c <"$WORKDIR/restore.backup" | tr -d ' ')"
-  pg_restore --dbname "$RESTORE_DATABASE_URL" --no-owner --no-acl --exit-on-error "$WORKDIR/restore.backup"
-  psql "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --command "SELECT current_database();"
+  assert_client_can_read "$RESTORE_DATABASE_URL"
+  "$PG_RESTORE" --dbname "$RESTORE_DATABASE_URL" --no-owner --no-acl --exit-on-error "$WORKDIR/restore.backup"
+  "$PSQL" "$RESTORE_DATABASE_URL" --set ON_ERROR_STOP=1 --command "SELECT current_database();"
 else
   fail "LIFEBOAT_MODE must be backup or restore-test."
 fi
