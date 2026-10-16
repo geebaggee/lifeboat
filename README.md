@@ -8,7 +8,7 @@ This folder is the action. It does not import the LastGood website. It can be mo
 
 `backup`:
 
-1. `pg_dump` in custom format, without owners or ACLs, so the dump includes application schemas and `auth`.
+1. `pg_dump` from `/usr/lib/postgresql/<major>/bin`, not the older client already on the runner `PATH`. Custom format, without owners or ACLs, so the dump includes application schemas and `auth`. If the server is a newer major than that client, the run stops before the upload.
 2. Uploads `lifeboat/db/<timestamp>.backup` to the destination bucket.
 3. If storage S3 credentials are set, copies each source bucket into `lifeboat/storage/<bucket>/`.
 4. Deletes destination objects under the prefix that are older than the retention window. The default is 30 days.

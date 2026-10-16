@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -17,9 +17,11 @@ test("the runner encrypts with openssl and does not delete when retention is off
   assert.match(source, /mask "\$\{DATABASE_URL:-\}"/);
   assert.match(source, /mask "\$\{LIFEBOAT_ENCRYPTION_PASSPHRASE:-\}"/);
   assert.match(source, /mask "\$\{CHECKIN_SECRET:-\}"/);
-  assert.match(source, /pg_dump "\$DATABASE_URL" --format=custom --no-owner --no-acl/);
+  assert.match(source, /"\$PG_DUMP" "\$DATABASE_URL" --format=custom --no-owner --no-acl/);
+  assert.match(source, /\/usr\/lib\/postgresql\/\$\{POSTGRES_MAJOR:-17\}\/bin/);
+  assert.match(source, /cannot read Postgres/);
   assert.doesNotMatch(source, /psql "\$DATABASE_URL"/);
-  assert.match(source, /pg_restore --dbname "\$RESTORE_DATABASE_URL"/);
+  assert.match(source, /"\$PG_RESTORE" --dbname "\$RESTORE_DATABASE_URL"/);
   assert.match(source, /Refusing to restore into DATABASE_URL/);
   assert.match(source, /value_or "\$\{S3_ENDPOINT:-}" "https:\/\/s3\.ap-southeast-2\.wasabisys\.com"/);
 });
@@ -137,6 +139,53 @@ test("a direct Supabase host fails before pg_dump and does not print the URL", (
   });
   assert.equal(encoded.result.status, 0, encoded.result.stderr);
   assert.doesNotMatch(encoded.result.stderr, new RegExp(password));
+});
+
+test("a newer server fails before upload and the versioned client is preferred", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "lg-pg-"));
+  const bin = path.join(dir, "bin");
+  mkdirSync(bin);
+  const marker = path.join(dir, "used-path-dump");
+  writeFileSync(
+    path.join(bin, "pg_dump"),
+    `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\\n' "pg_dump (PostgreSQL) 16.15"
+  exit 0
+fi
+printf '%s\\n' "versioned" > "${marker}"
+exit 1
+`,
+  );
+  writeFileSync(
+    path.join(bin, "pg_restore"),
+    "#!/bin/sh\nexit 0\n",
+  );
+  writeFileSync(
+    path.join(bin, "psql"),
+    "#!/bin/sh\nprintf '%s\\n' 170006\nexit 0\n",
+  );
+  chmodSync(path.join(bin, "pg_dump"), 0o755);
+  chmodSync(path.join(bin, "pg_restore"), 0o755);
+  chmodSync(path.join(bin, "psql"), 0o755);
+  const password = "version-password-must-stay-hidden";
+  const { result, log } = runBackup({
+    LIFEBOAT_ENCRYPT: "false",
+    LIFEBOAT_PG_BIN: bin,
+    POSTGRES_MAJOR: "16",
+    DATABASE_URL: `postgresql://lastgood_backup.abcdefghijklmnopqrst:${password}@aws-1-ap-northeast-1.pooler.supabase.com:5432/postgres`,
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /pg_dump 16 cannot read Postgres 17/);
+  assert.match(result.stderr, /\/usr\/lib\/postgresql\/17\/bin\/pg_dump/);
+  assert.equal(log, "");
+  assert.doesNotMatch(result.stderr, new RegExp(password));
+  assert.equal(existsSync(marker), false);
+
+  const action = readFileSync(path.join(ROOT, "action.yml"), "utf8");
+  assert.match(action, /\/usr\/lib\/postgresql\/\$\{major\}\/bin/);
+  assert.match(action, /GITHUB_PATH/);
+  assert.match(action, /POSTGRES_MAJOR: \$\{\{ inputs\.postgres-major \}\}/);
 });
 
 test("an empty passphrase fails before upload", () => {
