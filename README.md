@@ -96,7 +96,7 @@ GitHub secrets:
 
 Scheduled workflows stop after 60 days without a repository commit. That is GitHub's rule. The check-in is how LastGood notices the silence; the receiver is a separate change.
 
-The customer workflow starts `public.ecr.aws/supabase/postgres` for Postgres 15 and 17, and `postgres:<major>` otherwise. If the Supabase image does not become ready, or the runner has less than 10 GiB free, the job uses the stock image. The list filter still skips extensions that image does not offer. The dump uses `pg_dump` against `DATABASE_URL` and does not write to that database. Restore writes only to `RESTORE_DATABASE_URL`. The dump is encrypted on the runner before upload. Secret values are masked and are not printed.
+The customer workflow starts `public.ecr.aws/supabase/postgres` for Postgres 15 and 17, and `postgres:<major>` otherwise. If that image cannot be pulled or started, does not become ready, or the runner has less than 10 GiB free, the job uses the stock image. A pull error such as an image rate limit does not fail the restore test. The list filter still skips extensions that image does not offer. The dump uses `pg_dump` against `DATABASE_URL` and does not write to that database. Restore writes only to `RESTORE_DATABASE_URL`. The dump is encrypted on the runner before upload. Secret values are masked and are not printed.
 
 ## Publish this folder on its own
 

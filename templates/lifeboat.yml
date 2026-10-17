@@ -93,24 +93,26 @@ jobs:
           wait_db() {
             local user="$1"
             local i
-            for i in $(seq 1 60); do
+            local tries="${LIFEBOAT_RESTORE_WAIT_TRIES:-60}"
+            local pause="${LIFEBOAT_RESTORE_WAIT_SECONDS:-5}"
+            for i in $(seq 1 "$tries"); do
               if docker exec lifeboat-restore pg_isready -U "$user" >/dev/null 2>&1; then
                 return 0
               fi
-              sleep 5
+              sleep "$pause"
             done
             return 1
           }
-          start_db "$mode" "$image"
           if [ "$mode" = "supabase" ]; then
-            if ! wait_db supabase_admin; then
-              echo "The Supabase image did not become ready. Using postgres:17."
+            if ! start_db supabase "$image" || ! wait_db supabase_admin; then
+              echo "The Supabase image did not start. Using postgres:17."
               mode="stock"
               image="postgres:17"
               start_db stock "$image"
               wait_db postgres
             fi
           else
+            start_db stock "$image"
             wait_db postgres
           fi
           if [ "$mode" = "supabase" ]; then
